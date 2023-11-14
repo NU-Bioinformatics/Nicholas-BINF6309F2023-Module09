@@ -1,0 +1,462 @@
+---
+title: "Module_9_Lung_Data_MetagenomeSeq_Vignette"
+author: "Nick Chevalier"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+BASE_DIR = "/Users/nickolopolis/Documents/Northeastern/BINF6309_Bioinformatics_2/Week_9_metagenomics"
+set.seed(42)
+```
+
+## 1) Introduction
+```{r 1_introduction}
+library(metagenomeSeq)
+# If not installed then install using the following command: 
+if (!requireNamespace("BiocManager", quietly = TRUE))
+    install.packages("BiocManager")
+BiocManager::install("metagenomeSeq")
+BiocManager::install("biomformat")
+```
+Loading the metagenomeSeq package. Note that this package is maintained as part of Bioconductor and would need to be installed via BiocManager
+
+
+## 2) Data Prep
+### 2.1 Biom-Format
+```{r 2.1_biom-format}
+# reading in a biom file
+library(biomformat)
+biom_file <- system.file("extdata", "min_sparse_otu_table.biom",
+                         package = "biomformat")
+b <- read_biom(biom_file)
+biom2MRexperiment(b)
+
+
+# write to biom format
+data(mouseData)
+# options include to normalize or not
+b <- MRexperiment2biom(mouseData)
+# change original command 'write_biom(b, biom_file = "˜/Desktop/otu_table.biom")' to:
+write_biom(b, biom_file = file.path(BASE_DIR, "otu_table.biom"))
+```
+Reading and writing in a biom file. The BIOM file format (canonically pronounced biome) is designed to be a general-use format for representing biological sample by observation contingency tables. BIOM is a recognized standard for the Earth Microbiome Project and is a Genomics Standards Consortium supported project.designed for general use in broad areas of comparative -omics
+
+### 2.2 Load count data
+```{r 2.2_load-count}
+dataDirectory <- system.file("extdata", package = "metagenomeSeq")
+lung = loadMeta(file.path(dataDirectory, "CHK_NAME.otus.count.csv"))
+dim(lung$counts)
+# [1] 1000   78
+```
+Load the OTU Matrix of lung microbiome (delimited files of counts in the "extdata" folder) using loadMeta. Puts the counts into a list using the loadMeta function. metagenomeSeq includes functions for loading delimited files of counts loadMeta and phenodata (loadPhenoData). 
+
+### 2.3 Load taxonomy data
+```{r 2.3_load-taxa}
+taxa = read.delim(file.path(dataDirectory, "CHK_otus.taxonomy.csv"),
+                  stringsAsFactors = FALSE)
+```
+Load the annotated taxonomy and check to ensure our taxa annotations and OTUS are in the same order as the matrix rows
+
+### 2.4 Load metadata (phenotypic data)
+```{r 2.4_load-metadata}
+# load phenotype data in CHK_clinical.csv
+clin = loadPhenoData(file.path(dataDirectory, "CHK_clinical.csv"),
+                     tran = TRUE)
+ord = match(colnames(lung$counts), rownames(clin))
+clin = clin[ord, ]
+head(clin[1:2, ])
+```
+Loads phenotypic data in CHK_clinical.csv
+
+### 2.5 Create MRExperiment
+```{r 2.5_create-MRExperiment}
+# annotate phenotype data 
+phenotypeData = AnnotatedDataFrame(clin)
+phenotypeData
+
+
+# Annotate the taxa data into OTU (Organizational Taxonomical Unit) numbers.
+OTUdata = AnnotatedDataFrame(taxa)
+OTUdata
+
+
+# Combine lung counts, phenoData, and OTUdata (feature data) into an MRExperiment which is a complete annotated dataframe
+obj = newMRexperiment(lung$counts,phenoData=phenotypeData,featureData=OTUdata)
+# Links to a paper providing further details can be included optionally.
+# experimentData(obj) = annotate::pmid2MIAME("21680950")
+obj
+```
+Takes the count matrix, phenoData (needed to make into annotated data frame from clin), and featureData (needed to make annotated data frame from taxa) as input and creates a new MR Experiment aka a new annotated data frame. 
+
+## 2.6 Example datasets
+```{r 2.6_example-datasets}
+# 1) lung datasets - human lung microbiome consists of respiratory flora sampled from six healthy individuals.
+data(lungData)
+lungData
+
+# 2) Humanized gnotobiotic mouse gut
+data(mouseData)
+mouseData
+```
+Here we show 2 example datasets. 
+1st being the lung dataset which is the human lung microbiome consisting of respiratory flora sampled from six healthy individuals. Three healthy nonsmokers and three healthy smokers. The upper lung tracts were sampled by oral wash and oro-/nasopharyngeal swabs. Samples were taken using two bronchoscopes, serial bronchoalveolar lavage and lower airway protected brushes.
+2nd being the Humanized gnotobiotic mouse gut. This is twelve germ-free adult male C57BL/6J mice that were fed a low-fat, plant polysaccharide-rich diet. Each mouse was gavaged with healthy adult human fecal material. Following the fecal transplant, mice remained on the low-fat, plant
+polysacchaaride-rich diet for four weeks, following which a subset of 6 were switched to a high-fat and high-sugar diet for eight weeks. Fecal samples for each mouse went through PCR amplification of the bacterial 16S rRNA gene V2 region weekly. 
+Further details of experimental protocols and further details of the data can be found in Turnbaugh et. al. Sequences and further information can be found at: http://gordonlab.wustl.edu/TurnbaughSE_10_09/STM_2009.html
+
+## 2.7 Useful Commands
+```{r 2.7_useful-commands}
+# Access the phenotypic data using phenoData and pData
+phenoData(obj)
+
+head(pData(obj), 3)
+
+# Access feature data using the featureData and fdata methods
+featureData(obj)
+
+
+head(fData(obj)[, -c(2, 10)], 3)
+
+
+# Access raw/normalized counts matrix with MRcounts
+head(MRcounts(obj[, 1:2]))
+
+
+# subset MRexperiment data using which(rowSums ) and which(pData)
+featuresToKeep = which(rowSums(obj) >= 100)
+samplesToKeep = which(pData(obj)$SmokingStatus == "Smoker")
+obj_smokers = obj[featuresToKeep, samplesToKeep]
+obj_smokers
+
+
+head(pData(obj_smokers), 3)
+
+# Access/replace normalized scaling factors using normFactors method
+head(normFactors(obj))
+
+normFactors(obj) <- rnorm(ncol(obj))
+head(normFactors(obj))
+
+
+# Access/replace Library sizes (sequencing depths) with the libSize method
+head(libSize(obj))
+
+libSize(obj) <- rnorm(ncol(obj))
+head(libSize(obj))
+
+# filter data to maintain a threshold of minimum depth or OTU presence using filterData method
+data(mouseData)
+filterData(mouseData, present = 10, depth = 1000)
+
+
+# merge experiments with mergeMResperiments function
+data(mouseData)
+newobj = mergeMRexperiments(mouseData, mouseData)
+## MRexperiment 1 and 2 share sample ids; adding labels to sample ids.
+newobj
+```
+Useful commands to know to use:
+1) Access the phenotypic data using phenoData and pData
+2) Access feature data using the featureData and fdata methods
+3) Access raw/normalized counts matrix with MRcounts
+4) subset MRexperiment data using which(rowSums ) and which(pData)
+5) Access/replace normalized scaling factors using normFactors method
+6) Access/replace Library sizes (sequencing depths) with the libSize method
+7) filter data to maintain a threshold of minimum depth or OTU presence using filterData method
+8) merge experiments with mergeMResperiments function
+
+
+## 3) Calculating Normalization Factors
+```{r 3_normalize-counts}
+data(lungData)
+p = cumNormStatFast(lungData)
+# calculate scaling factors using cumNorm
+lungData = cumNorm(lungData, p = p)
+```
+Normalize counts using cumNorm. cumNorm is a normalization method that calculates scaling factors equal to the sum of counts up to a particular quantile.
+
+### 3.1 Calculate Normalization Factors Using Wrench
+```{r 3.1_normalization-wrench}
+condition = mouseData$diet
+mouseData = wrenchNorm(mouseData, condition = condition)
+```
+Alternative to using cumNorm, you can use wrench which behaves similarly but takes the argument condition instead of p.
+condition is a factor with values that separate samples into phenotypic groups of interest. Preferrable over cumulative normalization if possible.
+
+### 3.2 Export the data as normzlized count matrix
+```{r 3.2_export-data}
+# Export count matrices
+mat = MRcounts(lungData, norm = TRUE, log = TRUE)[1:5, 1:5]
+exportMat(mat, file = file.path(dataDirectory, "tmp.tsv"))
+
+# save summary statistics
+exportStats(lungData[, 1:5], file = file.path(dataDirectory,
+                                              "tmp.tsv"))
+## Default value being used.
+head(read.csv(file = file.path(dataDirectory, "tmp.tsv"), sep = "\t"))
+```
+Export count matrices using exportMat function. We also saves sample statistics using exportStats function
+
+## 4) Statistical Testing
+Adress the affects of under sampling on detecting differentially abundant features (OTUs, genes, etc.)
+### 4.1 Zero-inflated Log-Normal mixture
+reparamatize the zero-inflation model to fit a zero-inflated model for each specific OTU separately. Recommended to use the zero-infated log-normal model as implemented in 4.1.1
+#### 4.1.1 Use fitFeature model for differential abundance testing 
+```{r 4.1.1_fitFeature-model}
+data(lungData)
+lungData = lungData[, -which(is.na(pData(lungData)$SmokingStatus))]
+lungData = filterData(lungData, present = 30, depth = 1)
+lungData <- cumNorm(lungData, p = 0.5)
+pd <- pData(lungData)
+mod <- model.matrix(~1 + SmokingStatus, data = pd)
+lungres1 = fitFeatureModel(lungData, mod)
+head(MRcoefs(lungres1))
+```
+Example of fitFeature Model to fit a zero-inflated model comparing non-smokers to smokers lung microbiome.
+
+### 4.2 Zero-inflated Gaussian Mixture Model
+Function fitZig performs a complex mathematical optimization routine to estimate probabilities that a zero for a particular feature in a sample is a technical zero or not. The motivation to create fitZig comes from the reason that the depth of coverage in a sample is directly related to how many features are detected in a sample. The function relies heavily on the limma package. 
+Inputs for fitZig are design matrices which can be created in R by using the model.matrix function.
+This linear model methodology can easily incorporate confounding covariates in a straightforward manner. 
+Output includes weighted fits for each of the m features. R
+esults can be filtered and saved using MRcoefs or MRtable.
+
+#### 4.2.1 Example: Using fitZig for differential abundance testing
+```{r 4.2.1_fitZig}
+# load data and trim features that are not present in many samples, controls, and calculate the normalization factors
+data(lungData)
+controls = grep("Extraction.Control", pData(lungData)$SampleType)
+lungTrim = lungData[, -controls]
+rareFeatures = which(rowSums(MRcounts(lungTrim) > 0) < 10)
+lungTrim = lungTrim[-rareFeatures, ]
+lungp = cumNormStat(lungTrim, pFlag = TRUE, main = "Trimmed lung data")
+## Default value being used.
+# relative difference for the median difference in counts from the reference
+lungTrim = cumNorm(lungTrim, p = lungp)
+
+# define appropriate model matrix
+smokingStatus = pData(lungTrim)$SmokingStatus
+bodySite = pData(lungTrim)$SampleType
+normFactor = normFactors(lungTrim)
+normFactor = log2(normFactor/median(normFactor) + 1)
+mod = model.matrix(~smokingStatus + bodySite + normFactor)
+settings = zigControl(maxit = 10, verbose = TRUE)
+fit = fitZig(obj = lungTrim, mod = mod, useCSSoffset = FALSE,
+             control = settings)
+```
+Here we loaded data and trimmed features that are not present in many samples, controls, and then calculated the normalization factors. 
+The result, fit, is a list providing detailed estimates of the fits including a limma fit in fit-fit and an ebayes statistical fit in fit-eb. 
+This data can be analyzed like any limma fit and in this example, the column of the fitted coefficients represents the fold-change for our ”smoker” vs. ”nonsmoker” analysis. In this particular run, there appears to be OTUs representing two Prevotella, two Neisseria, a Porphyromonas and a Leptotrichia that are differentially abundant.
+
+
+#### 4.2.2 Multiple Groups
+```{r 4.2.2_multiple-groups}
+# maxit=1 is for demonstration purposes
+settings = zigControl(maxit = 1, verbose = FALSE)
+mod = model.matrix(~bodySite)
+colnames(mod) = levels(bodySite)
+# fitting the ZIG model
+res = fitZig(obj = lungTrim, mod = mod, control = settings)
+# The output of fitZig contains a list of various useful
+# items. hint: names(res). Probably the most useful is the
+# limma 'MLArrayLM' object called fit.
+zigFit = slot(res, "fit")
+finalMod = slot(res, "fit")$design
+contrast.matrix = makeContrasts(BAL.A - BAL.B, OW - PSB, levels = finalMod)
+fit2 = contrasts.fit(zigFit, contrast.matrix)
+fit2 = eBayes(fit2)
+topTable(fit2)
+
+```
+Assuming multiple groups, we use Limma's tobTable function for F-tests and contrast functions fo compare multiple groups of interest. 
+Output is a 'MLArrayLM' object that can be called on by other functions
+
+#### 4.2.3 Exporting Fits
+```{r 4.2.3_exporting-fits}
+taxa = sapply(strsplit(as.character(fData(lungTrim)$taxa), split = ";"),
+              function(i) {
+                i[length(i)]
+                })
+head(MRcoefs(fit, taxa = taxa, coef = 2))
+
+```
+MRcoefs, MRtable, and MRfulltable are used to view coefficient fits and related statistics and export the data with optional output values. Here we looked at MRcoefs to find the coefficients (p-values) for the OTUs
+
+### 4.3 Time Series Analysis
+```{r 4.3_time-series}
+# look through the time-series vignette
+vignette('fitTimeSeries')
+```
+fitTimeSeries is a method for calculating time intervals for which bacteria are differentially abundant.This method performs Smoothing Splines ANOVA (SS-ANOVA) in gss package and models the difference in abundance across all time. 
+
+
+### 4.4 Log Normal Permutation Test
+```{r 4.4_log-normal-perm}
+# Standard log normal linear model with permutation based p-values
+coeffOfInterest = 2
+res = fitLogNormal(obj = lungTrim, mod = mod, useCSSoffset = FALSE,
+B = 10, coef = coeffOfInterest)
+# extract p.values and adjust for multiple testing res$p
+# are the p-values calculated through permutation
+adjustedPvalues = p.adjust(res$p, method = "fdr")
+# extract the absolute fold-change estimates
+foldChange = abs(res$fit$coef[, coeffOfInterest])
+# determine features still significant and order by the
+sigList = which(adjustedPvalues <= 0.05)
+sigList = sigList[order(foldChange[sigList])]
+# view the top taxa associated with the coefficient of
+# interest.
+head(taxa[sigList])
+```
+Generate a list of significant features using standard log normal linear model with permutation based p-values. 
+
+### 4.5 Presence-absence testing
+```{r 4.5_presence-absence-testing}
+# calculate the presence-absence for each organism
+classes = pData(mouseData)$diet
+res = fitPA(mouseData[1:5, ], cl = classes)
+# Warning - the p-value is calculating 1 despite a high
+# odd's ratio.
+head(res)
+
+```
+Presence-absence test is predicated on the hypothesis that the proportion/odds of a given feature present is higher/lower among 1 group vs another. In the test we look to see if the difference in the proportions observed is significant using a Fisher's exact test to create a 2x2 contingency table and calculate p-values, odd's rations, and confidence intervals. 
+fitPA is the method used to calculate the presence-absence for each organism and returns a table of p-values, odd's rations, and confidence intervals.
+Input can be MRexperiment object or matrix.
+
+### 4.6 Discovery Odds Ratio Testing
+```{r 4.6_discovery-odds-ratio}
+# Calculate the proportion of counts for each organism
+classes = pData(mouseData)$diet
+res = fitDO(mouseData[1:100, ], cl = classes, norm = FALSE, log = FALSE)
+head(res)
+
+```
+Discovery test is predicated on the hypothesis that the proportion of observed counts for a feature of all counts are comparable between groups. We use Fisher’s exact test to createa 2x2 contingency table and calculate p-values, odd’s ratios, and confidence intervals similar to the presence-absence test. 
+fitDO is the method used to calculate the proportion of counts for each organism and returns a table of p-values, odd’s ratios, and confidence intervals. 
+Input can be either an MRexperiment object or matrix.
+
+### 4.7 Feature Correlations
+```{r 4.7_feature-correlations}
+# Test correlation of abundance
+cors = correlationTest(mouseData[55:60, ], norm = FALSE, log = FALSE)
+head(cors)
+
+```
+Tests the correlation of abundance features, or samples, in pairwise fashion using correlationTest and correlationIndices.
+correlationTest function calculates the basic pearson, spearman, kendall correlation statistics for the rows of the input and report the associated p-values.
+
+### 4.8 Unique OTUs or features
+```{r 4.8_unique-OTU-features}
+cl = pData(mouseData)[["diet"]]
+uniqueFeatures(mouseData, cl, nsamples = 10, nreads = 100)
+
+```
+The function uniqueFeatures finds features absent from any number of classes and provides a table of the feature ids, the number of positive features and reads for each group. Options are thresholding for the number of positive samples or reads required.
+
+## 5) Aggregating Counts
+```{r 5_aggregating-counts}
+# aggregate count matrix based on phylum
+obj = aggTax(mouseData, lvl = "phylum", out = "matrix")
+head(obj[1:5, 1:5])
+
+# aggregate samples using phenoData 
+obj = aggSamp(mouseData, fct = "mouseID", out = "matrix")
+head(obj[1:5, 1:5])
+```
+Functions are in place to aggregate the count matrix (normalized or not), based on a particular user defined level. We show this here by calling aggregateByTaxonomy or aggTax on a MRexperiment object and declare a particular featureData column name (i.e. ’genus’). This will aggregate counts to the desired level with the aggfun function (default colSums).  Other aggfun alternatives are colMeans and colMedians.
+
+Additionally, we aggregate samples using the phenoData information in the MRexperiment object. Calling aggregateBySample or aggsamp on a MRexperiment object and declaring a particular phenoData column name (i.e. ’mouseID’) will aggregate counts with the aggfun function (default rowMeans). Other aggfun alternatives include rowSums and rowMedians.
+
+## 6) Visualize Features
+### 6.2 Structural Overview
+```{r 6.2_structural-overview}
+# heatmap and hierarchical clustering of log2 transformed counts for the 200 OTUs with the largest overall variance. R
+# initialize data and set columns and colors
+trials = pData(mouseData)$diet
+heatmapColColors = brewer.pal(12, "Set3")[as.integer(factor(trials))]
+heatmapCols = colorRampPalette(brewer.pal(9, "RdBu"))(50)
+# plotMRheatmap
+plotMRheatmap(obj = mouseData, n = 200, cexRow = 0.4, cexCol = 0.4,
+trace = "none", col = heatmapCols, ColSideColors = heatmapColColors)
+# plotCorr
+plotCorr(obj = mouseData, n = 200, cexRow = 0.25, cexCol = 0.25,
+trace = "none", dendrogram = "none", col = heatmapCols)
+
+# CMDS plots of the data and the rarefaction effect at the OTU level
+cl = factor(pData(mouseData)$diet)
+# plotOrd - can load vegan and set distfun = vegdist and
+# use dist.method='bray'
+plotOrd(mouseData, tran = TRUE, usePCA = FALSE, useDist = TRUE,
+bg = cl, pch = 21)
+# plotRare
+res = plotRare(mouseData, cl = cl, pch = 21, bg = cl)
+# Linear fits for plotRare / legend
+tmp = lapply(levels(cl), function(lv) lm(res[, "ident"] ~res[,
+"libSize"] - 1, subset = cl == lv))
+for (i in 1:length(levels(cl))) {
+abline(tmp[[i]], col = i)
+}
+legend("topleft", c("Diet 1", "Diet 2"), text.col = c(1, 2),
+box.col = NA)
+```
+1. plotMRheatmap - heatmap of abundance estimates
+2. plotCorr - heatmap of pairwise correlations
+3. plotOrd - PCA/CMDS components
+4. plotRare - rarefaction effect
+5. plotBubble - contingency table style plot 
+
+### 6.3 Feature Specific
+```{r 6.3_feature-specific}
+head(MRtable(fit, coef = 2, taxa = 1:length(fData(lungTrim)$taxa)))
+
+
+patients = sapply(strsplit(rownames(pData(lungTrim)), split = "_"),
+function(i) {
+  i[3]
+  })
+pData(lungTrim)$patients = patients
+classIndex = list(smoker = which(pData(lungTrim)$SmokingStatus == "Smoker"))
+classIndex$nonsmoker = which(pData(lungTrim)$SmokingStatus == "NonSmoker")
+otu = 779
+
+# plotOTU
+# use plotOTU to plot the normalized log(cpt) of a specific OTU annotated as Neisseria meningitidis (779th row of lungTrim’s count matrix).
+plotOTU(lungTrim, otu = otu, classIndex, main = "Neisseria meningitidis")
+# Now multiple OTUs annotated similarly
+x = fData(lungTrim)$taxa[otu]
+otulist = grep(x, fData(lungTrim)$taxa)
+# plotGenus
+# use plotGenus we plot the normalized log(cpt) of all OTUs annotated as Neisseria meningitidis.
+plotGenus(lungTrim, otulist, classIndex, labs = FALSE, main = "Neisseria meningilablist")
+lablist <- c("S", "NS")
+axis(1, at = seq(1, 6, by = 1), labels = rep(lablist, times = 3))
+
+
+classIndex = list(Western = which(pData(mouseData)$diet == "Western"))
+classIndex$BK = which(pData(mouseData)$diet == "BK")
+otuIndex = 8770
+# par(mfrow=c(1,2))
+dates = pData(mouseData)$date
+plotFeature(mouseData, norm = FALSE, log = FALSE, otuIndex, classIndex,
+col = dates, sortby = dates, ylab = "Raw reads")
+
+```
+1. plotOTU - abundances of a particular feature by group
+2. plotGenus - abundances for several features similarly annotated by group
+3. plotFeature - abundances of a particular feature by group
+Using plotOTU and plotGenus, it appears that Neisseria meningitidis is differentially more abundant in nonsmokers.
+
+## 7) Summary
+In this rmd file, we work through the overall workflow for metagenomic analysis. To do this, we used metagenomeSeq which is specifically designed for sparse high-throughput sequencing experiments that addresses the analysis of differential abundance for marker-gene survey data. The package can also be used for other sparse data sets for which the zero-inflated Gaussian mixture model may apply.
+
+### 7.1 Citation
+```{r 7.1_citation}
+citation("metagenomeSeq")
+```
+### 7.2 Session Info
+```{r 7.2_session-info}
+sessionInfo()
+```
